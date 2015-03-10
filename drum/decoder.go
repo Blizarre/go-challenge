@@ -3,30 +3,41 @@ package drum
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 /*
 	Decode a line from the file
 */
-func readLine(p *Pattern, file *os.File) (int64, error) {
-	var id int32
+func readLine(p *Pattern, file *os.File) (int64, DrumLine, error) {
 	var textSize int8
+	var text []byte
 	var err error
 	var nbReadByte int64
+	var line DrumLine
 
-	err = readData(file, &id, err)
-	err = readData(file, &textSize, err)
+	err = readDataLE(file, &line.id, err)
+	err = readDataBE(file, &textSize, err)
+	nbReadByte += 4 + 1
+
+	log.Println("id: ", line.id, " textsize: ", textSize, " err: ", err)
 
 	if err != nil {
-		return 0, err
+		return nbReadByte, line, err
 	}
 
-	text := make([]byte, textSize)
-	err = readData(file, text, err)
+	text = make([]byte, textSize)
+	err = readDataBE(file, text, err)
+	err = readDataBE(file, &line.activate, err)
+	nbReadByte += int64(textSize) + 16
 
-	return nbReadByte, err
+	line.name = string(text)
+	log.Println("Line name: ", line.name)
+
+	return nbReadByte, line, err
 }
 
 /*
@@ -34,40 +45,47 @@ func readLine(p *Pattern, file *os.File) (int64, error) {
 	in the splice or an error.
 */
 func decodeHeader(p *Pattern, file *os.File) (int64, error) {
-	const versionLength = 32
+	magicNumber := []byte{'S', 'P', 'L', 'I', 'C', 'E'}
+	var head struct {
+		Magic     [6]byte
+		TotalSize int64
+		Version   [32]byte
+	}
 	var err error
-	var totalSize int64
 
-	version := make([]byte, versionLength)
+	err = readDataBE(file, &head, nil)
+	err = readDataLE(file, &p.tempo, err)
 
-	spliceMagicNumber := []byte{'S', 'P', 'L', 'I', 'C', 'E'}
-	magicNumber := make([]byte, len(spliceMagicNumber))
+	if err == nil {
 
-	err = nil
-	err = readData(file, magicNumber, err)
-	err = readData(file, &totalSize, err)
-	err = readData(file, version, err)
-
-	if err != nil {
-
-		for i, r := range spliceMagicNumber {
+		for i, r := range head.Magic {
 			if magicNumber[i] != r {
 				return 0, errors.New("Non conformant magic number")
 			}
 		}
 
-		p.version = string(version)
+		p.version = string(head.Version[:strings.Index(string(head.Version[:]), "\x00")])
 		log.Println("Version:", p.version)
-		log.Println("Total data Size:", totalSize)
+		log.Println("Total data Size:", head.TotalSize)
+		log.Println("Tempo:", p.tempo)
 	}
 
-	return totalSize - versionLength, err
+	return head.TotalSize - int64(len(head.Version)) - 4, err
 }
 
-func readData(f *os.File, data interface{}, err error) error {
+func readDataLE(f *os.File, data interface{}, err error) error {
 	if err != nil {
 		return err
 	}
+
+	return binary.Read(f, binary.LittleEndian, data)
+}
+
+func readDataBE(f *os.File, data interface{}, err error) error {
+	if err != nil {
+		return err
+	}
+
 	return binary.Read(f, binary.BigEndian, data)
 }
 
@@ -88,45 +106,55 @@ func DecodeFile(path string) (*Pattern, error) {
 		return nil, err
 	}
 
-	var unknown int16
-	var tempo int8
-	var beat byte
-
-	err = binary.Read(file, binary.BigEndian, &unknown)
-	err = binary.Read(file, binary.BigEndian, &tempo)
-
-	err = binary.Read(file, binary.BigEndian, &beat)
-
-	if err != nil {
-
-		if beat != 'B' {
-			log.Println("Beat doens not have the proper value")
-			return nil, errors.New("Invalid Beat")
-		}
-
-		log.Println("Unknown value %x", unknown)
-		log.Println("Tempo value %x", tempo)
-		log.Println("Beat value ", beat)
-		p.tempo = tempo >> 2
-
-		for err != nil && remainingBytes > 0 {
+	if err == nil {
+		for err == nil && remainingBytes > 0 {
 			var consumedBytes int64
-			consumedBytes, err = readLine(p, file)
+			var line DrumLine
+			consumedBytes, line, err = readLine(p, file)
+			p.data = append(p.data, line)
 			remainingBytes -= consumedBytes
 		}
 	}
 
-	return p, nil
+	return p, err
 }
 
 // Pattern is the high level representation of the
 // drum pattern contained in a .splice file.
 type Pattern struct {
 	version string
-	tempo   int8
-	data    []struct {
-		time   int
-		typeOf string
-		data   int
+	tempo   float32
+	data    []DrumLine
+}
+
+type DrumLine struct {
+	id       int32
+	name     string
+	activate [16]byte
+}
+
+func drawBeats(beatLine [16]byte) (ret string) {
+	ret = "|"
+	for i, b := range beatLine {
+		if i%4 == 0 && i > 0 {
+			ret += "|"
+		}
+		if b == 0 {
+			ret += "-"
+		} else {
+			ret += "x"
+		}
 	}
+	ret += "|"
+	return
+}
+
+func (p Pattern) String() (repr string) {
+	repr = "Saved with HW Version: " + p.version + "\n"
+	repr += "Tempo: " + fmt.Sprintf("%g", p.tempo) + "\n"
+	for _, d := range p.data {
+		repr += fmt.Sprintf("(%d) %s\t", d.id, d.name)
+		repr += drawBeats(d.activate) + "\n"
+	}
+	return
 }
