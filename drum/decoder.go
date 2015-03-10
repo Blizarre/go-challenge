@@ -3,7 +3,6 @@ package drum
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -15,7 +14,7 @@ func decodeMeasure(file *os.File) (nbReadByte int64, m Measure, err error) {
 	var text []byte
 	var steps [16]int8
 
-	err = readDataLE(file, &m.id, err)
+	err = readDataLE(file, &m.Id, err)
 	err = readDataLE(file, &textSize, err)
 	nbReadByte += 4 + 1
 
@@ -28,11 +27,11 @@ func decodeMeasure(file *os.File) (nbReadByte int64, m Measure, err error) {
 	err = readDataLE(file, &steps, err)
 
 	for i := 0; i < len(steps); i++ {
-		m.steps[i] = (steps[i] == 0)
+		m.Steps[i] = (steps[i] == 0)
 	}
 
 	nbReadByte += int64(textSize) + 16
-	m.name = string(text)
+	m.Name = string(text)
 
 	return nbReadByte, m, err
 }
@@ -49,7 +48,7 @@ func decodeHeader(p *Pattern, file *os.File) (int64, error) {
 	var err error
 
 	err = readDataBE(file, &head, nil)
-	err = readDataLE(file, &p.tempo, err)
+	err = readDataLE(file, &p.Tempo, err)
 
 	if err == nil {
 
@@ -59,10 +58,10 @@ func decodeHeader(p *Pattern, file *os.File) (int64, error) {
 			}
 		}
 
-		p.version = string(head.Version[:strings.Index(string(head.Version[:]), "\x00")])
-		log.Println("Version:", p.version)
+		p.Version = string(head.Version[:strings.Index(string(head.Version[:]), "\x00")])
+		log.Println("Version:", p.Version)
 		log.Println("Total data Size:", head.TotalSize)
-		log.Println("Tempo:", p.tempo)
+		log.Println("Tempo:", p.Tempo)
 	}
 
 	return head.TotalSize - int64(len(head.Version)) - 4, err
@@ -112,51 +111,10 @@ func DecodeFile(path string) (*Pattern, error) {
 			var consumedBytes int64
 			var line Measure
 			consumedBytes, line, err = decodeMeasure(file)
-			p.measures = append(p.measures, line)
+			p.Measures = append(p.Measures, line)
 			remainingBytes -= consumedBytes
 		}
 	}
 
 	return p, err
-}
-
-// Pattern is the high level representation of the
-// drum pattern contained in a .splice file.
-type Pattern struct {
-	version  string
-	tempo    float32
-	measures []Measure
-}
-
-// Measure is the high level representation of a measure.
-type Measure struct {
-	id    int32
-	name  string
-	steps [16]bool
-}
-
-func (d Measure) String() (repr string) {
-	repr = fmt.Sprintf("(%d) %s\t|", d.id, d.name)
-
-	for i, b := range d.steps {
-		if i%4 == 0 && i > 0 {
-			repr += "|"
-		}
-		if b {
-			repr += "-"
-		} else {
-			repr += "x"
-		}
-	}
-	repr += "|"
-	return
-}
-
-func (p Pattern) String() (repr string) {
-	repr = "Saved with HW Version: " + p.version + "\n"
-	repr += "Tempo: " + fmt.Sprintf("%g", p.tempo) + "\n"
-	for _, d := range p.measures {
-		repr += fmt.Sprint(d) + "\n"
-	}
-	return
 }
