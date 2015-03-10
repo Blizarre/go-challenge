@@ -58,8 +58,8 @@ func decodeHeader(p *Pattern, file *os.File) (int64, error) {
 			}
 		}
 
-		p.Version = string(head.Version[:strings.Index(string(head.Version[:]), "\x00")])
-		log.Println("Version:", p.Version)
+		p.HWVersion = string(head.Version[:strings.Index(string(head.Version[:]), "\x00")])
+		log.Println("Version:", p.HWVersion)
 		log.Println("Total data Size:", head.TotalSize)
 		log.Println("Tempo:", p.Tempo)
 	}

@@ -5,9 +5,9 @@ import "fmt"
 // Pattern is the high level representation of the
 // drum pattern contained in a .splice file.
 type Pattern struct {
-	Version  string
-	Tempo    float32
-	Measures []Measure
+	HWVersion string
+	Tempo     float32
+	Measures  []Measure
 }
 
 // Measure is the high level representation of a measure.
@@ -17,6 +17,8 @@ type Measure struct {
 	Steps [16]bool
 }
 
+// return the String representation of a Measure:
+// (id) name  |xxxx|--xx|--xx|xxxx|
 func (d Measure) String() (repr string) {
 	repr = fmt.Sprintf("(%d) %s\t|", d.Id, d.Name)
 
@@ -34,8 +36,9 @@ func (d Measure) String() (repr string) {
 	return
 }
 
+// return the String representation of a Pattern
 func (p Pattern) String() (repr string) {
-	repr = "Saved with HW Version: " + p.Version + "\n"
+	repr = "Saved with HW Version: " + p.HWVersion + "\n"
 	repr += "Tempo: " + fmt.Sprintf("%g", p.Tempo) + "\n"
 	for _, d := range p.Measures {
 		repr += fmt.Sprint(d) + "\n"
