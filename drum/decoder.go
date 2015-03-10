@@ -9,41 +9,36 @@ import (
 	"strings"
 )
 
-/*
-	Decode a line from the file
-*/
-func readLine(p *Pattern, file *os.File) (int64, DrumLine, error) {
+// Decode a measure from the file, and return the number of byte read from the file or an error
+func decodeMeasure(file *os.File) (nbReadByte int64, m Measure, err error) {
 	var textSize int8
 	var text []byte
-	var err error
-	var nbReadByte int64
-	var line DrumLine
+	var steps [16]int8
 
-	err = readDataLE(file, &line.id, err)
-	err = readDataBE(file, &textSize, err)
+	err = readDataLE(file, &m.id, err)
+	err = readDataLE(file, &textSize, err)
 	nbReadByte += 4 + 1
 
-	log.Println("id: ", line.id, " textsize: ", textSize, " err: ", err)
-
 	if err != nil {
-		return nbReadByte, line, err
+		return nbReadByte, m, err
 	}
 
 	text = make([]byte, textSize)
-	err = readDataBE(file, text, err)
-	err = readDataBE(file, &line.activate, err)
+	err = readDataLE(file, text, err)
+	err = readDataLE(file, &steps, err)
+
+	for i := 0; i < len(steps); i++ {
+		m.steps[i] = (steps[i] == 0)
+	}
+
 	nbReadByte += int64(textSize) + 16
+	m.name = string(text)
 
-	line.name = string(text)
-	log.Println("Line name: ", line.name)
-
-	return nbReadByte, line, err
+	return nbReadByte, m, err
 }
 
-/*
-	Decode the header of the splice, and return the number of bytes remaining
-	in the splice or an error.
-*/
+// Decode the header of the splice, and return the number of bytes remaining
+// in the splice or an error.
 func decodeHeader(p *Pattern, file *os.File) (int64, error) {
 	magicNumber := []byte{'S', 'P', 'L', 'I', 'C', 'E'}
 	var head struct {
@@ -73,6 +68,9 @@ func decodeHeader(p *Pattern, file *os.File) (int64, error) {
 	return head.TotalSize - int64(len(head.Version)) - 4, err
 }
 
+// Read data from the file in Little Endian. It is a wrapper from binary.read
+// If the input err != nil, nothing is read from the file and err is returned.
+// otherwise, the error value for binary.read is returned
 func readDataLE(f *os.File, data interface{}, err error) error {
 	if err != nil {
 		return err
@@ -81,6 +79,9 @@ func readDataLE(f *os.File, data interface{}, err error) error {
 	return binary.Read(f, binary.LittleEndian, data)
 }
 
+// Read data from the file in Big Endian. It is a wrapper from binary.read
+// If the input err != nil, nothing is read from the file and err is returned.
+// otherwise, the error value for binary.read is returned
 func readDataBE(f *os.File, data interface{}, err error) error {
 	if err != nil {
 		return err
@@ -109,9 +110,9 @@ func DecodeFile(path string) (*Pattern, error) {
 	if err == nil {
 		for err == nil && remainingBytes > 0 {
 			var consumedBytes int64
-			var line DrumLine
-			consumedBytes, line, err = readLine(p, file)
-			p.data = append(p.data, line)
+			var line Measure
+			consumedBytes, line, err = decodeMeasure(file)
+			p.measures = append(p.measures, line)
 			remainingBytes -= consumedBytes
 		}
 	}
@@ -122,39 +123,40 @@ func DecodeFile(path string) (*Pattern, error) {
 // Pattern is the high level representation of the
 // drum pattern contained in a .splice file.
 type Pattern struct {
-	version string
-	tempo   float32
-	data    []DrumLine
+	version  string
+	tempo    float32
+	measures []Measure
 }
 
-type DrumLine struct {
-	id       int32
-	name     string
-	activate [16]byte
+// Measure is the high level representation of a measure.
+type Measure struct {
+	id    int32
+	name  string
+	steps [16]bool
 }
 
-func drawBeats(beatLine [16]byte) (ret string) {
-	ret = "|"
-	for i, b := range beatLine {
+func (d Measure) String() (repr string) {
+	repr = fmt.Sprintf("(%d) %s\t|", d.id, d.name)
+
+	for i, b := range d.steps {
 		if i%4 == 0 && i > 0 {
-			ret += "|"
+			repr += "|"
 		}
-		if b == 0 {
-			ret += "-"
+		if b {
+			repr += "-"
 		} else {
-			ret += "x"
+			repr += "x"
 		}
 	}
-	ret += "|"
+	repr += "|"
 	return
 }
 
 func (p Pattern) String() (repr string) {
 	repr = "Saved with HW Version: " + p.version + "\n"
 	repr += "Tempo: " + fmt.Sprintf("%g", p.tempo) + "\n"
-	for _, d := range p.data {
-		repr += fmt.Sprintf("(%d) %s\t", d.id, d.name)
-		repr += drawBeats(d.activate) + "\n"
+	for _, d := range p.measures {
+		repr += fmt.Sprint(d) + "\n"
 	}
 	return
 }
